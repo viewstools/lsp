@@ -1,6 +1,6 @@
-# LSP Example
+# Views LSP
 
-Heavily documented sample code for https://code.visualstudio.com/api/language-extensions/language-server-extension-guide
+Language Server for Views Tools https://docs.views.tools
 
 ## Functionality
 

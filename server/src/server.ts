@@ -17,7 +17,17 @@ import {
   TextDocumentPositionParams,
   Position,
 } from 'vscode-languageserver'
+import {
+  addToMapSet,
+  getFilesView,
+  getFilesViewCustom,
+  getFilesFontCustom,
+  getViewIdFromFile,
+  processCustomFonts,
+} from '@viewstools/morph/lib.js'
+import * as pkgUp from 'pkg-up'
 import * as parseView from '@viewstools/morph/parse.js'
+import * as path from 'path'
 
 // Create a connection for the server. The connection uses Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
@@ -30,6 +40,40 @@ let documents: TextDocuments = new TextDocuments()
 let hasConfigurationCapability: boolean = false
 let hasWorkspaceFolderCapability: boolean = false
 let hasDiagnosticRelatedInformationCapability: boolean = false
+
+async function getViewsContext(file: string) {
+  let customFonts = new Map()
+  let viewsById = new Map()
+  let verbose = false
+
+  let pkg = (await pkgUp({ cwd: file })) || file
+  let src = path.dirname(pkg)
+
+  connection.console.log(`>>>>> ${src}`)
+
+  let [
+    filesView,
+    filesViewCustom,
+    filesFontCustom,
+  ] = await Promise.all([
+    getFilesView(src),
+    getFilesViewCustom(src),
+    getFilesFontCustom(src),
+  ])
+
+  for (let file of filesView) {
+    let id = getViewIdFromFile(file)
+    addToMapSet(viewsById, id, file)
+  }
+  for (let file of filesViewCustom) {
+    let id = getViewIdFromFile(file)
+    addToMapSet(viewsById, id, file)
+  }
+
+  processCustomFonts({ customFonts, filesFontCustom })
+
+  return { viewsById, customFonts }
+}
 
 connection.onInitialize((params: InitializeParams) => {
   let capabilities = params.capabilities
@@ -152,17 +196,20 @@ let mapPosition = (pos: ViewsWarningLocPoint): Position => ({
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
   // In this simple example we get the settings for every validate run.
   // let settings = await getDocumentSettings(textDocument.uri)
+  
+  connection.console.log(`OOOO* ${textDocument.uri}`)
 
-  // The validator creates diagnostics for all uppercase words length 2 and more
+  let { customFonts, viewsById } = await getViewsContext(textDocument.uri)
+
   let source = textDocument.getText()
-
+  
   let parsed = parseView({
+    customFonts: customFonts,
+    views: viewsById,
     source,
     skipComments: false,
     convertSlotToProps: false,
   })
-
-  // console.log('WARNINGS', JSON.stringify(parsed.warnings, null, '  '))
 
   let diagnostics: Diagnostic[] = parsed.warnings.map(
     (warning: ViewsWarning) => {
@@ -175,24 +222,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
         message: warning.type,
         source: 'ex',
       }
-      // if (hasDiagnosticRelatedInformationCapability) {
-      //   diagnostic.relatedInformation = [
-      //     {
-      //       location: {
-      //         uri: textDocument.uri,
-      //         range: Object.assign({}, diagnostic.range),
-      //       },
-      //       message: 'Spelling matters',
-      //     },
-      //     {
-      //       location: {
-      //         uri: textDocument.uri,
-      //         range: Object.assign({}, diagnostic.range),
-      //       },
-      //       message: 'Particularly for names',
-      //     },
-      //   ]
-      // }
       return diagnostic
     }
   )
@@ -241,26 +270,6 @@ connection.onCompletionResolve(
     return item
   }
 )
-
-/*
-connection.onDidOpenTextDocument((params) => {
-	// A text document got opened in VSCode.
-	// params.uri uniquely identifies the document. For documents store on disk this is a file URI.
-	// params.text the initial full content of the document.
-	connection.console.log(`${params.textDocument.uri} opened.`);
-});
-connection.onDidChangeTextDocument((params) => {
-	// The content of a text document did change in VSCode.
-	// params.uri uniquely identifies the document.
-	// params.contentChanges describe the content changes to the document.
-	connection.console.log(`${params.textDocument.uri} changed: ${JSON.stringify(params.contentChanges)}`);
-});
-connection.onDidCloseTextDocument((params) => {
-	// A text document got closed in VSCode.
-	// params.uri uniquely identifies the document.
-	connection.console.log(`${params.textDocument.uri} closed.`);
-});
-*/
 
 // Make the text document manager listen on the connection
 // for open, change and close text document events
